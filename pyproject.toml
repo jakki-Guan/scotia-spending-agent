@@ -1,0 +1,91 @@
+[project]
+name = "scotia-spending-agent"
+version = "0.1.0"
+description = "LLM-powered personal finance agent that analyzes Scotiabank transactions with tool-calling reasoning"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Jake Guan" }
+]
+license = { text = "MIT" }
+keywords = ["llm", "agent", "finance", "tool-calling", "data-analysis"]
+
+# Phase 1 core dependencies - always needed
+dependencies = [
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "python-dotenv>=1.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+]
+
+[dependency-groups]
+# Phase 2 - LLM backends
+llm = [
+    "anthropic>=0.40",
+    "ollama>=0.4",
+]
+
+# Phase 3 - Gradio UI
+ui = [
+    "gradio>=5.0",
+]
+
+# Development tools - not needed in production
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "jupyter>=1.1",
+    "ipykernel>=6.29",
+]
+
+# Future expansion slot - uncomment when needed
+# advanced = [
+#     "chromadb>=0.5",           # Vector DB for semantic transaction search
+#     "sentence-transformers",    # Embeddings
+#     "duckdb>=1.1",              # Fast local analytical queries
+# ]
+
+# ---- Tool configurations ----
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["notebooks", ".venv", "data", "output"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "N",   # pep8-naming
+    "UP",  # pyupgrade (modernize syntax)
+    "B",   # flake8-bugbear (common bugs)
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # line too long - handled by formatter
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true

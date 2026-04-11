@@ -1,0 +1,49 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# ---- Project-specific additions ----
+
+# Real bank data - NEVER commit
+data/raw/
+data/processed/
+*.csv
+!data/sample_anonymized.csv
+
+# Secrets and env
+.env
+.env.local
+*.key
+
+# Output artifacts
+output/charts/
+output/reports/
+
+# IDE and editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Tool caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+
+# Logs
+*.log
+logs/
