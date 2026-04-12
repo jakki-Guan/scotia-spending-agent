@@ -196,22 +196,48 @@ def _call_llm(description: str, sub_description: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-# Regex to rescue the category even when JSON is malformed.
-# Accepts both "category": "restaurant" and "category":"restaurant" etc.
-_CATEGORY_REGEX = re.compile(
-    r'"category"\s*:\s*"([^"]+)"',
-    re.IGNORECASE,
-)
+# --------------------------------------------------------------------------
+# Regex rescue helpers
+# --------------------------------------------------------------------------
+# When JSON parsing fails (malformed quotes, stray whitespace in keys, etc.)
+# we still try to salvage individual fields. The category regex is the must-
+# have; confidence and reasoning are best-effort — if they parse cleanly we
+# report them honestly rather than default to 0.5, because the user-facing
+# value of an accurate confidence (for UI indicators, eval histograms) is
+# high and the cost of trying is a single regex.
+_CATEGORY_REGEX = re.compile(r'"category"\s*:\s*"([^"]+)"', re.IGNORECASE)
+_CONFIDENCE_REGEX = re.compile(r'"confidence"\s*:\s*([0-9]*\.?[0-9]+)', re.IGNORECASE)
+_REASONING_REGEX = re.compile(r'"\s*reasoning\s*"\s*:\s*"([^"]*)"', re.IGNORECASE)
+_RESCUE_MARKER = "[rescued from malformed JSON] "
+
+
+def _coerce_confidence(value: object, default: float = 0.5) -> float:
+    """Clamp any input to [0.0, 1.0]. Falls back to default on bad input."""
+    try:
+        return max(0.0, min(1.0, float(value)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_category(value: object) -> str:
+    """Lowercase, strip, and validate against VALID_CATEGORIES."""
+    category = str(value or "").strip().lower()
+    if category not in VALID_CATEGORIES:
+        logger.warning("Unknown category %r; coercing to uncategorized", category)
+        category = "uncategorized"
+    return category
 
 
 def _parse_response(raw: str) -> CategoryResult:
     """Parse and validate the LLM's JSON response.
 
     Two-stage defensive parsing:
-      1. Try json.loads on cleaned text (strips markdown fences).
-      2. If that fails, regex-extract just the category field. This
-         rescues the ~1-2% of responses where LLM JSON mode emits a
-         stray quote or similar mistake but the category itself is correct.
+      1. Strict json.loads on cleaned text (strips markdown fences).
+      2. Regex rescue on each field individually if JSON parse fails.
+         Category is required; confidence and reasoning are best-effort
+         and reported honestly when successfully extracted. The reasoning
+         field is prefixed with a rescue marker so downstream eval and UI
+         can distinguish rescued results from clean ones.
     """
     # Strip ``` fences if present (some models add them despite JSON mode)
     text = raw.strip()
@@ -224,44 +250,38 @@ def _parse_response(raw: str) -> CategoryResult:
     # --- Stage 1: strict JSON parse ---
     try:
         data = json.loads(text)
-        category = str(data.get("category", "")).strip().lower()
-        try:
-            confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
-        except (TypeError, ValueError):
-            confidence = 0.5
-        reasoning = str(data.get("reasoning", "")).strip()
-
-        if category not in VALID_CATEGORIES:
-            logger.warning("LLM returned unknown category %r; coercing to uncategorized", category)
-            category = "uncategorized"
-
         return CategoryResult(
-            category=category,
-            confidence=confidence,
-            reasoning=reasoning,
+            category=_coerce_category(data.get("category")),
+            confidence=_coerce_confidence(data.get("confidence")),
+            reasoning=str(data.get("reasoning", "")).strip(),
             raw_response=raw,
             source="llm",
         )
 
     except json.JSONDecodeError:
-        # --- Stage 2: regex rescue ---
-        logger.info("JSON parse failed, attempting regex rescue of category field")
-        match = _CATEGORY_REGEX.search(text)
-        if not match:
+        # --- Stage 2: regex rescue, best-effort per field ---
+        logger.info("JSON parse failed; attempting regex rescue")
+
+        cat_match = _CATEGORY_REGEX.search(text)
+        if not cat_match:
+            # No category at all — we have nothing to return.
             raise ValueError(f"LLM returned unparseable response: {raw[:200]}") from None
 
-        category = match.group(1).strip().lower()
-        if category not in VALID_CATEGORIES:
-            logger.warning(
-                "Regex rescue found unknown category %r; coercing to uncategorized",
-                category,
-            )
-            category = "uncategorized"
+        category = _coerce_category(cat_match.group(1))
+
+        conf_match = _CONFIDENCE_REGEX.search(text)
+        confidence = _coerce_confidence(conf_match.group(1)) if conf_match else 0.5
+
+        reasoning_match = _REASONING_REGEX.search(text)
+        rescued_reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
+        reasoning = (
+            _RESCUE_MARKER + rescued_reasoning if rescued_reasoning else _RESCUE_MARKER.strip()
+        )
 
         return CategoryResult(
             category=category,
-            confidence=0.5,  # Penalized: we salvaged this, so mark lower confidence
-            reasoning="(rescued from malformed JSON)",
+            confidence=confidence,
+            reasoning=reasoning,
             raw_response=raw,
             source="llm",
         )
