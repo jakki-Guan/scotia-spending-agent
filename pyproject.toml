@@ -22,7 +22,7 @@ dependencies = [
 [dependency-groups]
 # Phase 2 - LLM backends
 llm = [
-    "anthropic>=0.40",
+    "openai>=1.50",
     "ollama>=0.4",
 ]
 
