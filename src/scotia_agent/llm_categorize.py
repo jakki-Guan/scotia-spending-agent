@@ -56,9 +56,9 @@ class CategoryResult(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)
     reasoning: str = Field(default="", description="LLM's stated rationale")
     raw_response: str = Field(default="", description="Full LLM output for debugging")
-    source: Literal["llm", "fallback"] = Field(
+    source: Literal["llm", "rule", "fallback"] = Field(
         default="llm",
-        description="'fallback' means LLM failed and we returned uncategorized",
+        description="'rule' = keyword match, 'llm' = model inference, 'fallback' = LLM failed",
     )
 
 
