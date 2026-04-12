@@ -24,6 +24,8 @@ RULES: list[tuple[str, str]] = [
     ("scotiabank transit", "bank_fees"),  # branch txn / adjustment
     ("payment from", "payment"),  # credit card payment IN
     ("from - *****", "payment"),
+    ("manulife travel insurance", "insurance"),
+    ("immigration canada online", "government_fees"),
     # ---------- Subscriptions (digital) ----------
     ("claude.ai", "subscription_ai"),
     ("anthropic", "subscription_ai"),
@@ -53,6 +55,7 @@ RULES: list[tuple[str, str]] = [
     ("queen's", "education"),
     ("parchment", "education"),
     ("vue*testing", "education"),
+    ("xyna international", "education"),
     ("wl *vue", "education"),
     # ---------- Transport: rideshare (Uber Eats BEFORE Uber!) ----------
     ("ubereats", "food_delivery"),
@@ -69,13 +72,17 @@ RULES: list[tuple[str, str]] = [
     ("presto", "transit"),
     ("go tvm", "transit"),
     ("hamilton - go", "transit"),
+    ("via rail", "transit"),
     ("pioneer stn", "fuel"),
     ("cannon st esso", "fuel"),
     ("esso", "fuel"),
     ("petro-canada", "fuel"),
+    ("1000503499 ontario", "fuel"),
     ("communauto", "car_rental"),
     ("enterprise canada", "car_rental"),
     ("poparide", "rideshare"),
+    ("booking.com", "travel"),
+    ("cn tower online ticket", "travel"),
     ("blue mountain", "travel"),
     # ---------- Groceries & convenience ----------
     ("james street market", "groceries"),  # 143 hits — main grocery
@@ -132,8 +139,18 @@ RULES: list[tuple[str, str]] = [
     ("flora pizzeria", "restaurant"),
     ("grill shack", "restaurant"),
     ("ciao bella", "restaurant"),
+    ("mars village", "restaurant"),
     ("los mayas", "restaurant"),
+    ("piazzetta st-jean", "restaurant"),
+    ("the works", "restaurant"),
     ("chef bai", "restaurant"),
+    ("secco", "restaurant"),
+    ("jan bingo", "restaurant"),
+    ("ramen isshin", "restaurant"),
+    ("bouillon bilk", "restaurant"),
+    ("l'entrecote", "restaurant"),
+    ("tst-hexagon", "restaurant"),
+    ("tst-the standard", "restaurant"),
     ("goldies fast food", "restaurant"),
     # ---------- Personal care ----------
     ("family hair cut", "personal_care"),
@@ -145,17 +162,25 @@ RULES: list[tuple[str, str]] = [
     ("jump +", "fitness"),
     ("bungie store", "gaming"),
     ("xsolla", "gaming"),
+    ("iris galerie", "entertainment"),
     ("4 u bad centre", "fitness"),
     ("apple.com/bill", "gaming"),
     ("paypal *youzusingap", "gaming"),  # gaming
     # ---------- Online shopping ----------
     ("amazon.ca", "shopping_online"),
+    ("amazon*", "shopping_online"),  # generic Amazon fallback (after specific Amazon rules above)
     ("best buy", "shopping_online"),
     ("canada computers", "shopping_online"),
     ("tri-star computer", "shopping_online"),
     ("taobao", "shopping_online"),
     ("shoe point", "shopping_retail"),
     ("styledemocracy", "shopping_online"),
+    ("octobers very own", "shopping_online"),
+    ("arcteryx", "shopping_online"),
+    ("jellycat inc", "shopping_online"),
+    ("uniqlo", "shopping_online"),
+    ("toronto duty free", "shopping_online"),
+    ("niagara outlet", "shopping_online"),
     # ---------- Coca-Cola bottling = vending/workplace, not a drink purchase ----------
     ("coca cola", "vending"),
     ("coca-cola", "vending"),
