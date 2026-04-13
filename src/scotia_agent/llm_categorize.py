@@ -20,15 +20,31 @@ import json
 import logging
 import re
 import time
-from typing import Literal
+from typing import Any, Literal
 
-from openai import APIError, APITimeoutError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field, ValidationError
 
 from scotia_agent.categories import RULES
 from scotia_agent.config import settings
 
 logger = logging.getLogger(__name__)
+
+OPENAI_SDK_AVAILABLE = True
+
+try:
+    from openai import APIError, APITimeoutError, OpenAI, RateLimitError
+except ModuleNotFoundError:
+    OPENAI_SDK_AVAILABLE = False
+    OpenAI = Any  # type: ignore[assignment]
+
+    class APIError(Exception):
+        """Fallback placeholder when openai SDK is unavailable."""
+
+    class APITimeoutError(Exception):
+        """Fallback placeholder when openai SDK is unavailable."""
+
+    class RateLimitError(Exception):
+        """Fallback placeholder when openai SDK is unavailable."""
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +91,8 @@ Available categories:
   food_delivery, rideshare, transit, fuel, parking, carshare, car_rental,
   travel, shopping_online, shopping_retail, pharmacy, personal_care, vape,
   entertainment, fitness, gaming, education, telecom, utilities, insurance,
-  government_fees, subscription_ai, subscription_media, subscription_cloud,
-  subscription_pro, bank_fees, payment, vending, uncategorized
+  government_fees, subscription_ai, subscription_media, subscription_shopping_online,
+  subscription_cloud,subscription_pro, bank_fees, payment, vending, uncategorized
 """
 
 SYSTEM_PROMPT = f"""\
@@ -120,6 +136,10 @@ _client: OpenAI | None = None
 def _get_client() -> OpenAI:
     global _client
     if _client is None:
+        if not OPENAI_SDK_AVAILABLE:
+            raise RuntimeError(
+                "OpenAI SDK is not installed. Run `uv sync --group llm` before using LLM fallback."
+            )
         if not settings.llm_api_key:
             raise RuntimeError(
                 "LLM_API_KEY not configured. Set it in .env or disable LLM "

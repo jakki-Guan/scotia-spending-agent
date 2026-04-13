@@ -44,6 +44,40 @@ def _round2(x: float) -> float:
     return round(float(x), 2)
 
 
+CATEGORY_GROUPS: dict[str, list[str]] = {
+    "subscriptions": [
+        "subscription_ai",
+        "subscription_media",
+        "subscription_cloud",
+        "subscription_pro",
+        "subscription_shopping_online",
+    ],
+    "dining": [
+        "restaurant",
+        "fast_food",
+        "coffee",
+        "bubble_tea",
+        "dessert",
+        "food_delivery",
+        "alcohol",
+    ],
+    "shopping": [
+        "shopping_online",
+        "shopping_retail",
+        "subscription_shopping_online",
+        "pharmacy",
+        "personal_care",
+    ],
+    "transport": [
+        "rideshare",
+        "transit",
+        "fuel",
+        "parking",
+        "car_rental",
+    ],
+}
+
+
 def _normalize_text(value: str | None) -> str:
     """Uppercase and collapse whitespace for stable matching/grouping."""
     return re.sub(r"\s+", " ", str(value or "").strip().upper())
@@ -77,6 +111,36 @@ def _filter_merchant(scope: pd.DataFrame, merchant: str) -> pd.DataFrame:
 
     contains = scope[keys.str.contains(key, na=False)]
     return contains
+
+
+def _filter_month_range(
+    df: pd.DataFrame,
+    month_from: str | None = None,
+    month_to: str | None = None,
+) -> pd.DataFrame:
+    if month_from is not None:
+        df = df[df["month"] >= month_from]
+    if month_to is not None:
+        df = df[df["month"] <= month_to]
+    return df
+
+
+def _resolve_category_group(
+    group: str | None = None,
+    categories: list[str] | None = None,
+) -> tuple[str, list[str]]:
+    if categories:
+        return group or "custom", categories
+
+    if group is None:
+        raise ValueError("Provide either 'group' or 'categories' for grouped category trend.")
+
+    normalized = group.strip().lower()
+    resolved = CATEGORY_GROUPS.get(normalized)
+    if resolved is None:
+        available = ", ".join(sorted(CATEGORY_GROUPS))
+        raise ValueError(f"Unknown category group {group!r}. Available groups: {available}")
+    return normalized, resolved
 
 
 # --------------------------------------------------------------------------
@@ -174,7 +238,38 @@ def get_monthly_trend(
 
 
 # --------------------------------------------------------------------------
-# Tool 4: search_transactions
+# Tool 4: get_grouped_category_trend
+# --------------------------------------------------------------------------
+
+
+def get_grouped_category_trend(
+    df: pd.DataFrame,
+    group: str | None = None,
+    categories: list[str] | None = None,
+    month_from: str | None = None,
+    month_to: str | None = None,
+) -> dict:
+    scope = spending_only(df)
+    resolved_group, resolved_categories = _resolve_category_group(group=group, categories=categories)
+    scope = scope[scope["category"].isin(resolved_categories)]
+    scope = _filter_month_range(scope, month_from=month_from, month_to=month_to)
+
+    by_month = scope.groupby("month")["amount"].sum().sort_index()
+    by_category = scope.groupby("category")["amount"].sum().sort_values(ascending=False)
+
+    return {
+        "group": resolved_group,
+        "categories": resolved_categories,
+        "month_from": month_from if month_from else "all",
+        "month_to": month_to if month_to else "all",
+        "total": _round2(scope["amount"].sum()),
+        "by_category": {cat: _round2(amt) for cat, amt in by_category.items()},
+        "trend": [{"month": m, "amount": _round2(amt)} for m, amt in by_month.items()],
+    }
+
+
+# --------------------------------------------------------------------------
+# Tool 5: search_transactions
 # --------------------------------------------------------------------------
 
 
@@ -346,6 +441,48 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_grouped_category_trend",
+            "description": (
+                "Show month-by-month posted debit spending for a grouped category question such as "
+                "subscriptions, dining, shopping, or transport. Use this when the user asks about a "
+                "high-level spending bucket that spans multiple categories."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "group": {
+                        "type": "string",
+                        "enum": sorted(CATEGORY_GROUPS),
+                        "description": (
+                            "Named category group such as subscriptions, dining, shopping, "
+                            "or transport."
+                        ),
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional custom category list. Use this for ad-hoc grouped analysis "
+                            "when the built-in groups are not enough."
+                        ),
+                    },
+                    "month_from": {
+                        "type": "string",
+                        "description": "Optional inclusive month lower bound in YYYY-MM format.",
+                    },
+                    "month_to": {
+                        "type": "string",
+                        "description": "Optional inclusive month upper bound in YYYY-MM format.",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_transactions",
             "description": (
                 "Search raw transactions as a fallback lookup tool. Supports text search across "
@@ -414,6 +551,7 @@ TOOL_REGISTRY: dict[str, ToolFn] = {
     "get_spending_by_category": get_spending_by_category,
     "get_top_merchants": get_top_merchants,
     "get_monthly_trend": get_monthly_trend,
+    "get_grouped_category_trend": get_grouped_category_trend,
     "search_transactions": search_transactions,
 }
 

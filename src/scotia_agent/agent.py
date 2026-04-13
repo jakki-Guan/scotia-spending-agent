@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from openai import OpenAI
 
 from .config import settings
 from .enrich import prepare_dataframe
@@ -31,6 +30,8 @@ Use tools for factual claims. Do not invent numbers.
 How to work:
 - Prefer structured tool evidence over free-form guessing.
 - Start broad, then drill down: category summary -> top merchants -> trend -> transaction search.
+- For grouped spending questions like subscriptions, dining, shopping, or transport,
+  prefer the grouped-category trend tool instead of scanning many categories one by one.
 - Use search_transactions as the fallback lookup tool for pending rows, credits/refunds,
   sub-description/location questions, or when you need exact transactions.
 - Multiple tool calls are allowed when the question needs comparison, drill-down, or evidence.
@@ -133,18 +134,35 @@ class SpendingAgent:
         self,
         df: pd.DataFrame,
         *,
-        client: OpenAI | Any | None = None,
+        client: Any | None = None,
         model: str | None = None,
         max_iterations: int = 6,
     ):
         self.df = df
-        self.client = client or OpenAI(
-            api_key=settings.llm_api_key,
-            base_url=settings.llm_base_url,
-        )
+        self.client = client or self._build_default_client()
         self.model = model or settings.llm_model
         self.max_iterations = max_iterations
         self.dataset_context = _build_dataset_context(df)
+
+    def _build_default_client(self) -> Any:
+        """Create the default OpenAI-compatible client lazily.
+
+        Delayed import keeps non-LLM modules importable when the optional
+        `llm` dependency group is not installed yet, and lets us raise a
+        friendlier error at runtime.
+        """
+        try:
+            from openai import OpenAI
+        except ModuleNotFoundError as e:
+            raise RuntimeError(
+                "OpenAI SDK is not installed. Run `uv sync --group llm` "
+                "(or `uv sync --group llm --group ui` for the app) before using the agent."
+            ) from e
+
+        return OpenAI(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+        )
 
     def _create_completion(self, messages: list[dict[str, Any]]) -> Any:
         """Send one model turn with tool definitions attached."""
