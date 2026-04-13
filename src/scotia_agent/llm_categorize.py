@@ -20,6 +20,7 @@ import json
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -131,6 +132,90 @@ def _build_user_prompt(description: str, sub_description: str | None = None) -> 
 # ---------------------------------------------------------------------------
 
 _client: OpenAI | None = None
+_cache: dict[str, dict[str, Any]] | None = None
+
+
+def _cache_key(description: str, sub_description: str | None = None) -> str:
+    """Stable cache key for one merchant/location pair."""
+    desc = re.sub(r"\s+", " ", description.strip().lower())
+    sub = re.sub(r"\s+", " ", (sub_description or "").strip().lower())
+    return f"{desc}||{sub}"
+
+
+def _get_cache_path() -> Path:
+    return Path(settings.llm_cache_path)
+
+
+def _load_cache() -> dict[str, dict[str, Any]]:
+    """Load the on-disk cache once per process."""
+    global _cache
+    if _cache is not None:
+        return _cache
+
+    if not settings.llm_cache_enabled:
+        _cache = {}
+        return _cache
+
+    path = _get_cache_path()
+    if not path.exists():
+        _cache = {}
+        return _cache
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        _cache = data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Failed to read LLM cache at %s; starting with empty cache", path)
+        _cache = {}
+    return _cache
+
+
+def _write_cache(cache: dict[str, dict[str, Any]]) -> None:
+    """Persist the in-memory cache atomically."""
+    if not settings.llm_cache_enabled:
+        return
+
+    path = _get_cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(cache, ensure_ascii=True, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _get_cached_result(description: str, sub_description: str | None = None) -> CategoryResult | None:
+    """Return a cached LLM result when available."""
+    if not settings.llm_cache_enabled:
+        return None
+
+    cache = _load_cache()
+    payload = cache.get(_cache_key(description, sub_description))
+    if payload is None:
+        return None
+
+    try:
+        return CategoryResult.model_validate(payload)
+    except ValidationError:
+        logger.warning("Ignoring invalid cached LLM result for %r", description)
+        return None
+
+
+def _store_cached_result(
+    description: str,
+    sub_description: str | None,
+    result: CategoryResult,
+) -> None:
+    """Store successful LLM inference results for reuse."""
+    if not settings.llm_cache_enabled:
+        return
+    if result.source != "llm":
+        return
+
+    cache = _load_cache()
+    cache[_cache_key(description, sub_description)] = result.model_dump()
+    try:
+        _write_cache(cache)
+    except OSError:
+        logger.warning("Failed to persist LLM cache to %s", _get_cache_path())
 
 
 def _get_client() -> OpenAI:
@@ -343,9 +428,15 @@ def llm_categorize(
             source="fallback",
         )
 
+    cached = _get_cached_result(description, sub_description)
+    if cached is not None:
+        return cached
+
     try:
         raw = _call_llm(description, sub_description)
-        return _parse_response(raw)
+        result = _parse_response(raw)
+        _store_cached_result(description, sub_description, result)
+        return result
     except (APIError, RateLimitError, APITimeoutError) as e:
         logger.error("LLM call failed permanently: %s", e)
         return CategoryResult(

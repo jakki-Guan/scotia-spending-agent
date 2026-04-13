@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from scotia_agent.agent import SpendingAgent, format_tool_trace
+from scotia_agent.agent import ANSWER_STYLE_PROMPT, SpendingAgent, format_tool_trace
 
 
 def make_agent_df() -> pd.DataFrame:
@@ -89,6 +89,27 @@ class FakeClient:
 
 
 class TestSpendingAgent:
+    def test_missing_openai_dependency_raises_friendly_runtime_error(self, monkeypatch):
+        df = make_agent_df()
+
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "openai":
+                raise ModuleNotFoundError("No module named 'openai'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        try:
+            SpendingAgent(df)
+        except RuntimeError as e:
+            assert "uv sync --group llm" in str(e)
+        else:
+            raise AssertionError("Expected RuntimeError when openai SDK is unavailable")
+
     def test_agent_can_chain_multiple_tools_before_answering(self):
         df = make_agent_df()
         client = FakeClient(
@@ -144,6 +165,12 @@ class TestSpendingAgent:
         assert result.answer == "You spent 15.75 total on coffee in these rows."
         assert result.tool_trace == []
         assert result.stop_reason == "final_answer"
+
+        first_call_messages = client.completions.calls[0]["messages"]
+        assert any(
+            message["role"] == "system" and message["content"] == ANSWER_STYLE_PROMPT
+            for message in first_call_messages
+        )
 
     def test_agent_records_tool_errors_in_trace_instead_of_crashing(self):
         df = make_agent_df()

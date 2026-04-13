@@ -10,9 +10,11 @@ from __future__ import annotations
 import pandas as pd
 
 from scotia_agent.tools import (
+    CATEGORY_GROUPS,
     TOOL_REGISTRY,
     TOOLS_SCHEMA,
     call_tool,
+    get_grouped_category_trend,
     get_monthly_trend,
     get_spending_by_category,
     get_top_merchants,
@@ -108,6 +110,42 @@ def make_enriched_df() -> pd.DataFrame:
                 "confidence": 1.0,
                 "cat_source": "rule",
             },
+            {
+                "date": pd.Timestamp("2026-03-06"),
+                "description": "Spotify P40AAA2DCF",
+                "sub_description": None,
+                "status": "posted",
+                "txn_type": "debit",
+                "amount": 12.99,
+                "month": "2026-03",
+                "category": "subscription_media",
+                "confidence": 1.0,
+                "cat_source": "rule",
+            },
+            {
+                "date": pd.Timestamp("2026-03-07"),
+                "description": "OpenAI *ChatGPT Subscr",
+                "sub_description": None,
+                "status": "posted",
+                "txn_type": "debit",
+                "amount": 20.00,
+                "month": "2026-03",
+                "category": "subscription_ai",
+                "confidence": 1.0,
+                "cat_source": "rule",
+            },
+            {
+                "date": pd.Timestamp("2026-04-03"),
+                "description": "LinkedIn Premium",
+                "sub_description": None,
+                "status": "posted",
+                "txn_type": "debit",
+                "amount": 35.00,
+                "month": "2026-04",
+                "category": "subscription_pro",
+                "confidence": 1.0,
+                "cat_source": "rule",
+            },
         ]
     )
     return df
@@ -119,9 +157,11 @@ class TestGetSpendingByCategory:
         result = get_spending_by_category(df, month="2026-03")
 
         assert result["month"] == "2026-03"
-        assert result["total"] == 42.10
+        assert result["total"] == 75.09
         assert result["by_category"] == {
             "groceries": 32.10,
+            "subscription_ai": 20.00,
+            "subscription_media": 12.99,
             "coffee": 10.00,
         }
 
@@ -129,7 +169,7 @@ class TestGetSpendingByCategory:
 class TestGetTopMerchants:
     def test_groups_merchants_case_insensitively(self):
         df = make_enriched_df()
-        result = get_top_merchants(df, n=3, month="2026-03")
+        result = get_top_merchants(df, n=5, month="2026-03")
 
         assert result["month"] == "2026-03"
         assert result["category"] == "all"
@@ -138,11 +178,11 @@ class TestGetTopMerchants:
             "amount": 32.10,
             "transactions": 1,
         }
-        assert result["merchants"][1] == {
+        assert {
             "merchant": "Tim Hortons #0226",
             "amount": 10.00,
             "transactions": 2,
-        }
+        } in result["merchants"]
 
     def test_applies_category_filter_before_grouping(self):
         df = make_enriched_df()
@@ -161,6 +201,54 @@ class TestGetMonthlyTrend:
 
         assert result["category"] == "coffee"
         assert result["merchant"] == "all"
+        assert result["trend"] == [
+            {"month": "2026-03", "amount": 10.00},
+            {"month": "2026-04", "amount": 6.00},
+        ]
+
+
+class TestGetGroupedCategoryTrend:
+    def test_builtin_group_aggregates_multiple_categories(self):
+        df = make_enriched_df()
+        result = get_grouped_category_trend(df, group="subscriptions")
+
+        assert result["group"] == "subscriptions"
+        assert result["categories"] == CATEGORY_GROUPS["subscriptions"]
+        assert result["total"] == 67.99
+        assert result["by_category"] == {
+            "subscription_pro": 35.00,
+            "subscription_ai": 20.00,
+            "subscription_media": 12.99,
+        }
+        assert result["trend"] == [
+            {"month": "2026-03", "amount": 32.99},
+            {"month": "2026-04", "amount": 35.00},
+        ]
+
+    def test_month_range_filters_grouped_trend(self):
+        df = make_enriched_df()
+        result = get_grouped_category_trend(
+            df,
+            group="subscriptions",
+            month_from="2026-04",
+            month_to="2026-04",
+        )
+
+        assert result["month_from"] == "2026-04"
+        assert result["month_to"] == "2026-04"
+        assert result["total"] == 35.00
+        assert result["trend"] == [{"month": "2026-04", "amount": 35.00}]
+
+    def test_custom_category_list_is_supported(self):
+        df = make_enriched_df()
+        result = get_grouped_category_trend(
+            df,
+            categories=["coffee", "dessert"],
+        )
+
+        assert result["group"] == "custom"
+        assert result["categories"] == ["coffee", "dessert"]
+        assert result["total"] == 16.00
         assert result["trend"] == [
             {"month": "2026-03", "amount": 10.00},
             {"month": "2026-04", "amount": 6.00},
@@ -241,12 +329,12 @@ class TestSearchTransactions:
         df = make_enriched_df()
         result = search_transactions(df, max_amount=50, limit=2)
 
-        assert result["total_matches"] == 7
+        assert result["total_matches"] == 10
         assert result["returned"] == 2
         assert result["truncated"] is True
         assert [txn["date"] for txn in result["transactions"]] == [
+            "2026-04-03",
             "2026-04-02",
-            "2026-04-01",
         ]
 
 
@@ -270,7 +358,18 @@ class TestToolSchemasAndDispatch:
         )
 
         assert result["month"] == "2026-03"
-        assert result["total"] == 42.10
+        assert result["total"] == 75.09
+
+    def test_call_tool_dispatches_grouped_category_trend(self):
+        df = make_enriched_df()
+        result = call_tool(
+            "get_grouped_category_trend",
+            df,
+            {"group": "subscriptions"},
+        )
+
+        assert result["group"] == "subscriptions"
+        assert result["total"] == 67.99
 
     def test_call_tool_accepts_json_string_arguments(self):
         df = make_enriched_df()

@@ -13,6 +13,39 @@ from typing import Any
 
 from scotia_agent.agent import SpendingAgent, ToolTrace, load_agent_dataframe
 
+APP_CSS = """
+.gradio-container {
+  max-width: 1500px !important;
+}
+
+#hero-copy p {
+  color: #d7d3cb;
+  max-width: 900px;
+}
+
+#sidebar-card,
+#conversation-card,
+#trace-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015));
+}
+
+#status-card {
+  border: 1px solid rgba(255, 153, 51, 0.22);
+  border-radius: 14px;
+  background: rgba(255, 153, 51, 0.08);
+  padding: 10px 14px;
+}
+
+#dataset-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 4px 10px;
+}
+"""
+
 
 def _empty_session() -> dict[str, Any]:
     return {
@@ -55,6 +88,11 @@ def build_dataset_summary(df, errors: list[dict[str, Any]], csv_path: str | None
         f"- Categories: {category_preview}\n"
         f"{warnings}"
     )
+
+
+def build_status_markdown(status: str, heading: str = "Status") -> str:
+    """Render a compact status card."""
+    return f"### {heading}\n\n{status}"
 
 
 def _format_currency(value: Any) -> str:
@@ -169,7 +207,7 @@ def handle_upload(file_path: str | None) -> tuple[dict[str, Any], str, list[dict
             "### Dataset\n\nUpload a Scotia CSV to begin.",
             [],
             "### Tool Trace\n\nNo run yet.",
-            "No file selected.",
+            build_status_markdown("No file selected."),
         )
 
     df, errors = load_agent_dataframe(file_path)
@@ -179,8 +217,17 @@ def handle_upload(file_path: str | None) -> tuple[dict[str, Any], str, list[dict
         "errors": errors,
     }
     summary = build_dataset_summary(df, errors, file_path)
-    status = f"Loaded `{Path(file_path).name}` successfully."
-    return session, summary, [], "### Tool Trace\n\nNo run yet.", status
+    if errors:
+        status_text = (
+            f"Loaded `{Path(file_path).name}` with {len(errors)} validation warning(s). "
+            "The excluded rows will not be used by the agent."
+        )
+    else:
+        status_text = f"Loaded `{Path(file_path).name}` successfully and the dataset is ready for questions."
+    return session, summary, [], "### Tool Trace\n\nNo run yet.", build_status_markdown(
+        status_text,
+        heading="Run Status",
+    )
 
 
 def handle_question(
@@ -191,10 +238,14 @@ def handle_question(
     """Run one user question through the agent and update the chat history."""
     history = list(history or [])
     if not question or not question.strip():
-        return history, "### Tool Trace\n\nNo run yet.", "Please enter a question."
+        return history, "### Tool Trace\n\nNo run yet.", build_status_markdown("Please enter a question.")
 
     if not session or session.get("df") is None:
-        return history, "### Tool Trace\n\nNo run yet.", "Upload a CSV before asking questions."
+        return (
+            history,
+            "### Tool Trace\n\nNo run yet.",
+            build_status_markdown("Upload a CSV before asking questions."),
+        )
 
     agent = SpendingAgent(session["df"])
     result = agent.ask(question)
@@ -203,13 +254,20 @@ def handle_question(
     history.append({"role": "assistant", "content": result.answer})
 
     trace_md = render_tool_trace_markdown(result.tool_trace)
-    status = f"Answered in {result.iterations} iteration(s); stop reason: `{result.stop_reason}`."
+    status = build_status_markdown(
+        f"Answered in {result.iterations} iteration(s); stop reason: `{result.stop_reason}`.",
+        heading="Run Status",
+    )
     return history, trace_md, status
 
 
 def clear_chat() -> tuple[list[dict[str, str]], str, str]:
     """Clear only the conversational part of the session."""
-    return [], "### Tool Trace\n\nNo run yet.", "Chat cleared. Dataset is still loaded."
+    return (
+        [],
+        "### Tool Trace\n\nNo run yet.",
+        build_status_markdown("Chat cleared. Dataset is still loaded.", heading="Run Status"),
+    )
 
 
 def build_demo():
@@ -232,34 +290,51 @@ def build_demo():
         gr.Markdown(
             """
             # Scotia Spending Agent
-            Upload a Scotiabank CSV, then ask a question about your spending.
-            The app will show both the answer and the tool calls used to reach it.
-            """
+            Upload a Scotiabank CSV, then ask a question about your spending.  
+            The app answers with structured tool evidence rather than pure free-form chat.
+            """,
+            elem_id="hero-copy",
         )
 
         with gr.Row():
-            with gr.Column(scale=1):
+            with gr.Column(scale=1, elem_id="sidebar-card"):
+                gr.Markdown(
+                    """
+                    ### 1. Load Data
+                    Upload your Scotia CSV once. The app will validate rows, prepare categories,
+                    and make the dataset available to the agent.
+                    """
+                )
                 file_input = gr.File(label="Upload Scotia CSV", type="filepath")
                 load_button = gr.Button("Load CSV", variant="primary")
-                dataset_summary = gr.Markdown("### Dataset\n\nUpload a Scotia CSV to begin.")
-                status_box = gr.Markdown("No file loaded yet.")
+                dataset_summary = gr.Markdown(
+                    "### Dataset\n\nUpload a Scotia CSV to begin.",
+                    elem_id="dataset-card",
+                )
+                status_box = gr.Markdown(
+                    build_status_markdown("No file loaded yet."),
+                    elem_id="status-card",
+                )
 
-            with gr.Column(scale=2):
-                chatbot = gr.Chatbot(label="Conversation", height=420)
+            with gr.Column(scale=2, elem_id="conversation-card"):
+                chatbot = gr.Chatbot(label="Conversation", height=460)
                 question_box = gr.Textbox(
-                    label="Ask a question",
+                    label="2. Ask a question",
                     placeholder="e.g. Has my coffee spending increased recently?",
                     lines=2,
                 )
                 with gr.Row():
                     ask_button = gr.Button("Ask", variant="primary")
                     clear_button = gr.Button("Clear Chat")
-                trace_box = gr.Markdown("### Tool Trace\n\nNo run yet.")
+                with gr.Accordion("How The Agent Worked", open=True, elem_id="trace-card"):
+                    trace_box = gr.Markdown("### Tool Trace\n\nNo run yet.")
 
         example_questions = gr.Examples(
             examples=[
                 ["How much did I spend on coffee last month?"],
                 ["Has my coffee spending increased recently?"],
+                ["What do my dining costs look like each month?"],
+                ["What are my subscription costs for each month?"],
                 ["What were my top merchants in 2026-03?"],
                 ["Do I have any pending transactions?"],
             ],
@@ -317,7 +392,7 @@ def build_demo():
 def main() -> None:
     """Launch the Gradio app."""
     demo = build_demo()
-    demo.launch()
+    demo.launch(css=APP_CSS)
 
 
 if __name__ == "__main__":

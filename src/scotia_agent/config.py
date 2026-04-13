@@ -29,6 +29,14 @@ class Settings(BaseSettings):
         default=True,
         description="If False, categorize() returns 'uncategorized' instead of calling LLM",
     )
+    llm_cache_enabled: bool = Field(
+        default=True,
+        description="If True, persist successful LLM categorization results in a local cache.",
+    )
+    llm_cache_path: str = Field(
+        default=".cache/llm_category_cache.json",
+        description="Local JSON cache path for successful LLM categorization results.",
+    )
 
 
 settings = Settings()

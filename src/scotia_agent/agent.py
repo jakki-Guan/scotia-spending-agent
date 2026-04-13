@@ -39,6 +39,17 @@ How to work:
 - Keep final answers concise but insightful. Mention the main evidence behind your conclusion.
 """
 
+ANSWER_STYLE_PROMPT = """\
+Final answer style:
+- Start with one short bottom-line sentence that directly answers the user's question.
+- Then give 2-4 short bullet points with the strongest supporting evidence.
+- Prefer aggregated evidence over long transaction dumps unless the user explicitly asks for transaction-level detail.
+- Mention the relevant month, category, merchant, or date range when it matters.
+- Format money as dollars with 2 decimals when possible.
+- If the evidence is sparse or ambiguous, end with one brief caveat sentence.
+- Avoid long essays and avoid repeating the full tool output verbatim.
+"""
+
 
 @dataclass
 class ToolTrace:
@@ -178,6 +189,7 @@ class SpendingAgent:
         """Answer one user question, using tools as needed."""
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": ANSWER_STYLE_PROMPT},
             {"role": "system", "content": self.dataset_context},
             {"role": "user", "content": question},
         ]

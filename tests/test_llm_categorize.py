@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import pytest
 
+import scotia_agent.llm_categorize as llm_mod
 from scotia_agent.llm_categorize import (
+    CategoryResult,
     _coerce_category,
     _coerce_confidence,
     _parse_response,
+    llm_categorize,
 )
 
 
@@ -151,3 +154,83 @@ class TestParseResponseUnrecoverable:
         raw = '{"category": "quantum_lunch", "confidence": 0.8, "reasoning": "bad "json"'
         r = _parse_response(raw)
         assert r.category == "uncategorized"
+
+
+@pytest.fixture(autouse=True)
+def reset_llm_cache(monkeypatch):
+    monkeypatch.setattr(llm_mod, "_cache", None)
+
+
+class TestLlmCategorizeCache:
+    def test_successful_llm_result_is_cached_and_reused(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(llm_mod.settings, "llm_cache_enabled", True)
+        monkeypatch.setattr(llm_mod.settings, "llm_cache_path", str(tmp_path / "llm_cache.json"))
+
+        calls = []
+
+        def fake_call_llm(description, sub_description):
+            calls.append((description, sub_description))
+            return '{"category": "coffee", "confidence": 0.9, "reasoning": "known merchant"}'
+
+        monkeypatch.setattr(llm_mod, "_call_llm", fake_call_llm)
+
+        first = llm_categorize("Example Merchant", "Toronto ON")
+        second = llm_categorize("Example Merchant", "Toronto ON")
+
+        assert first.category == "coffee"
+        assert second.category == "coffee"
+        assert len(calls) == 1
+        assert (tmp_path / "llm_cache.json").exists()
+
+    def test_fallback_results_are_not_cached(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(llm_mod.settings, "llm_cache_enabled", True)
+        monkeypatch.setattr(llm_mod.settings, "llm_cache_path", str(tmp_path / "llm_cache.json"))
+
+        calls = []
+
+        class DummyApiError(Exception):
+            pass
+
+        monkeypatch.setattr(llm_mod, "APIError", DummyApiError)
+
+        def fake_call_llm(description, sub_description):
+            calls.append((description, sub_description))
+            raise DummyApiError("boom")
+
+        monkeypatch.setattr(llm_mod, "_call_llm", fake_call_llm)
+
+        first = llm_categorize("Broken Merchant", None)
+        second = llm_categorize("Broken Merchant", None)
+
+        assert first.source == "fallback"
+        assert second.source == "fallback"
+        assert len(calls) == 2
+
+    def test_cache_file_is_loaded_on_new_process_like_run(self, monkeypatch, tmp_path):
+        cache_path = tmp_path / "llm_cache.json"
+        cache_path.write_text(
+            """{
+  "example merchant||toronto on": {
+    "category": "coffee",
+    "confidence": 0.88,
+    "reasoning": "cached",
+    "raw_response": "",
+    "source": "llm"
+  }
+}""",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(llm_mod.settings, "llm_cache_enabled", True)
+        monkeypatch.setattr(llm_mod.settings, "llm_cache_path", str(cache_path))
+
+        def should_not_run(*args, **kwargs):
+            raise AssertionError("LLM should not be called when cache already has the merchant")
+
+        monkeypatch.setattr(llm_mod, "_call_llm", should_not_run)
+        monkeypatch.setattr(llm_mod, "_cache", None)
+
+        result = llm_categorize("Example Merchant", "Toronto ON")
+
+        assert isinstance(result, CategoryResult)
+        assert result.category == "coffee"
+        assert result.confidence == 0.88
