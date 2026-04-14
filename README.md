@@ -1,3 +1,13 @@
+---
+title: Scotia Spending Agent
+emoji: 💳
+colorFrom: orange
+colorTo: gray
+sdk: gradio
+app_file: app.py
+python_version: "3.11"
+---
+
 # Scotia Spending Agent
 
 > Tool-calling personal finance agent for Scotiabank credit card data.
@@ -6,9 +16,25 @@ This project turns raw Scotia Visa CSV exports into an interactive spending anal
 
 It is intentionally not just "LLM in, text out". The interesting part is the agent loop: the model sees a small set of analysis tools, calls them, reads their structured outputs, and produces a grounded answer. The Gradio app also shows the tool trace so the reasoning is visible.
 
+## Demo
+
+### Demo GIF
+
+![Demo GIF](docs/assets/demo.gif)
+
+Suggested recording flow:
+
+1. Upload a Scotia CSV
+2. Ask: `What are my subscription costs for each month?`
+3. Show the answer plus the tool trace using `get_grouped_category_trend`
+
 ## What It Can Do
 
+- Start with a bundled anonymized sample dataset so visitors can try the app immediately
 - Load a real Scotia CSV export and validate every row with Pydantic
+- Let users upload their own CSV and choose whether to:
+  - overwrite the current dataset
+  - append to the current dataset and dedupe exact duplicate transactions
 - Categorize transactions with hybrid logic:
   - fast deterministic rules for common merchants
   - LLM fallback for long-tail merchants and ambiguous strings
@@ -25,10 +51,14 @@ It is intentionally not just "LLM in, text out". The interesting part is the age
 - `Phase 0`: Environment and tooling setup complete
 - `Phase 1`: Parser + rule-based categorization complete
 - `Phase 2`: Hybrid categorization + tool-calling agent complete
-- `Phase 3`: Gradio UI running locally
-- `Phase 4`: README polish / demo assets / deployment still to do
+- `Phase 3`: Gradio UI running locally with default sample-data flow
+- `Phase 4`: Demo assets are in place; deployment prep is next
 
 ## Architecture
+
+### Architecture Diagram
+
+![Architecture Diagram](docs/assets/architecture.png)
 
 ```text
 CSV
@@ -55,7 +85,7 @@ Core modules:
 - [src/scotia_agent/agent.py](src/scotia_agent/agent.py)
   Domain-specific multi-tool reasoning loop.
 - [app.py](app.py)
-  Gradio UI for upload, Q&A, and tool-trace display.
+  Gradio UI for sample-data-first usage, CSV upload, Q&A, and tool-trace display.
 
 ## Why This Is Interesting
 
@@ -148,7 +178,12 @@ If you only want to work on the non-LLM parts, you can leave `LLM_FALLBACK_ENABL
 uv run python app.py
 ```
 
-Then upload a Scotia CSV export and ask questions in the browser.
+By default, the app preloads `data/sample_anonymized.csv`, so you can ask questions immediately.
+
+You can also upload your own Scotia CSV and choose:
+
+- `overwrite`: replace the current dataset
+- `append`: merge new rows into the current dataset and remove exact duplicates
 
 ### Run The CLI Agent
 
@@ -174,6 +209,16 @@ Successful LLM categorization results are cached locally at:
 ```
 
 This improves repeated loads of the same dataset or repeated merchants across sessions. Fallback/error results are not cached.
+
+## Sample Data
+
+The repository now includes:
+
+```text
+data/sample_anonymized.csv
+```
+
+This file is derived from real Scotia data but anonymized to remove real merchant names, exact locations, exact dates, and exact amounts while preserving the Scotia CSV shape and the broad spending patterns needed for the demo.
 
 ## Project Structure
 
@@ -216,14 +261,14 @@ Longer rationale lives in [DESIGN.md](DESIGN.md).
 - The agent is tuned for spending analysis, not general personal-finance planning
 - Some grouped financial questions still want additional tools in the future
   Examples: recurring charges, month-over-month comparisons, anomaly detection
-- The README does not yet include demo GIFs or screenshots optimized for GitHub presentation
+- The public demo path still depends on deployment and public-env configuration
 
 ## Next Steps
 
-- Polish README with demo GIF / screenshots / architecture diagram
-- Tighten the UI and tool-trace presentation further
-- Add one or two higher-value analysis tools if they improve real user questions
-- Deploy the Gradio app to Hugging Face Spaces
+- Prepare the Gradio app for Hugging Face Spaces deployment
+- Decide the public demo configuration for env vars, cache behavior, and sample-data startup
+- Do one final README pass after deployment details are known
+- Only then decide whether more analysis tools are worth adding
 
 ## License
 
