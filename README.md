@@ -27,7 +27,7 @@ It is intentionally not just "LLM in, text out". The interesting part is the age
 
 ### Demo GIF
 
-![Demo GIF](docs/assets/demo.gif)
+<img src="docs/assets/demo.gif" alt="Demo GIF" width="100%" />
 
 Recording flow:
 
