@@ -124,6 +124,56 @@ class TestAppHelpers:
         assert "No run yet" in trace
         assert "Upload a CSV" in status
 
+    def test_handle_upload_overwrite_replaces_dataset(self, monkeypatch):
+        incoming_df = make_df().iloc[[0]].copy()
+
+        monkeypatch.setattr(app, "load_agent_dataframe", lambda _: (incoming_df, []))
+
+        session, summary, history, trace, status = app.handle_upload(
+            "data/raw/new.csv",
+            "overwrite",
+            {"df": make_df(), "csv_path": "old.csv", "errors": [], "source_label": "old.csv"},
+        )
+
+        assert len(session["df"]) == 1
+        assert session["source_label"] == "new.csv"
+        assert history == []
+        assert "new.csv" in summary
+        assert "Loaded `new.csv` successfully" in status
+
+    def test_handle_upload_append_merges_and_dedupes(self, monkeypatch):
+        existing_df = make_df()
+        appended_df = pd.concat([make_df().iloc[[1]], make_df().iloc[[0]]], ignore_index=True)
+
+        monkeypatch.setattr(app, "load_agent_dataframe", lambda _: (appended_df, []))
+
+        session, summary, history, trace, status = app.handle_upload(
+            "data/raw/q2.csv",
+            "append",
+            {
+                "df": existing_df,
+                "csv_path": "old.csv",
+                "errors": [],
+                "source_label": "sample_anonymized.csv (default sample)",
+            },
+        )
+
+        assert len(session["df"]) == 2
+        assert "sample_anonymized.csv" in session["source_label"]
+        assert "q2.csv" in session["source_label"]
+        assert history == []
+        assert "Rows available to the agent: 2" in summary
+        assert "duplicate row" in status
+
+    def test_load_default_sample_session_returns_empty_when_missing(self, monkeypatch):
+        monkeypatch.setattr(app.Path, "exists", lambda self: False)
+
+        session, summary, status = app._load_default_sample_session()
+
+        assert session["df"] is None
+        assert "Upload a Scotia CSV to begin." in summary
+        assert "No file loaded yet." in status
+
     def test_handle_question_updates_history_and_trace(self, monkeypatch):
         fake_result = SimpleNamespace(
             answer="Coffee spending increased slightly.",

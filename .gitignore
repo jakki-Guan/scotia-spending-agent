@@ -47,3 +47,6 @@ desktop.ini
 # Logs
 *.log
 logs/
+# AI assistant context (not for git)
+PROJECT_CONTEXT.md
+eval/latest_report.md
