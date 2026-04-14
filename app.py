@@ -8,19 +8,34 @@ the agent reasoned.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
+
+# Keep the src-layout importable both locally and on Hugging Face Spaces.
+ROOT = Path(__file__).resolve().parent
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from scotia_agent.agent import SpendingAgent, ToolTrace, load_agent_dataframe
 
 APP_CSS = """
 .gradio-container {
-  max-width: 1500px !important;
+  max-width: min(96vw, 1880px) !important;
+  margin: 0 auto !important;
+  padding: 24px 20px 40px !important;
 }
 
 #hero-copy p {
   color: #d7d3cb;
-  max-width: 900px;
+  max-width: 1100px;
+}
+
+.gradio-container .gr-row {
+  gap: 20px;
 }
 
 #sidebar-card,
@@ -50,15 +65,27 @@ APP_CSS = """
 def _empty_session() -> dict[str, Any]:
     return {
         "csv_path": None,
+        "source_label": None,
         "df": None,
         "errors": [],
     }
 
 
-def build_dataset_summary(df, errors: list[dict[str, Any]], csv_path: str | None = None) -> str:
+def _display_source_label(source: str | None) -> str:
+    if not source:
+        return ""
+    source_path = Path(source)
+    return source_path.name if source_path.name else source
+
+
+def build_dataset_summary(
+    df,
+    errors: list[dict[str, Any]],
+    source_label: str | None = None,
+) -> str:
     """Render a short markdown summary of the loaded dataset."""
     title = "### Dataset Loaded"
-    source = f"- Source: `{Path(csv_path).name}`\n" if csv_path else ""
+    source = f"- Source: `{_display_source_label(source_label)}`\n" if source_label else ""
 
     if df is None or df.empty:
         return f"{title}\n\n{source}- No valid transaction rows were loaded."
@@ -88,6 +115,71 @@ def build_dataset_summary(df, errors: list[dict[str, Any]], csv_path: str | None
         f"- Categories: {category_preview}\n"
         f"{warnings}"
     )
+
+
+def _dedupe_transactions(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop exact duplicate transactions after append-style loads."""
+    if df.empty:
+        return df
+
+    deduped = (
+        df.sort_values("date", kind="stable")
+        .drop_duplicates(
+            subset=[
+                "date",
+                "description",
+                "sub_description",
+                "status",
+                "txn_type",
+                "amount",
+            ],
+            keep="first",
+        )
+        .reset_index(drop=True)
+    )
+    return deduped
+
+
+def _session_from_dataframe(
+    df: pd.DataFrame,
+    errors: list[dict[str, Any]],
+    *,
+    csv_path: str | None,
+    source_label: str,
+) -> dict[str, Any]:
+    return {
+        "csv_path": csv_path,
+        "source_label": source_label,
+        "df": df,
+        "errors": errors,
+    }
+
+
+def _load_default_sample_session() -> tuple[dict[str, Any], str, str]:
+    """Load the bundled anonymized sample dataset if it exists."""
+    sample_path = Path("data/sample_anonymized.csv")
+    if not sample_path.exists():
+        return (
+            _empty_session(),
+            "### Dataset\n\nUpload a Scotia CSV to begin.",
+            build_status_markdown("No file loaded yet."),
+        )
+
+    df, errors = load_agent_dataframe(sample_path)
+    source_label = "sample_anonymized.csv (default sample)"
+    session = _session_from_dataframe(df, errors, csv_path=str(sample_path), source_label=source_label)
+    summary = build_dataset_summary(df, errors, source_label)
+    if errors:
+        status_text = (
+            "Loaded the default sample dataset with "
+            f"{len(errors)} validation warning(s). You can still upload your own CSV."
+        )
+    else:
+        status_text = (
+            "Loaded the default sample dataset. You can ask questions immediately "
+            "or upload your own Scotia CSV."
+        )
+    return session, summary, build_status_markdown(status_text, heading="Run Status")
 
 
 def build_status_markdown(status: str, heading: str = "Status") -> str:
@@ -199,32 +291,79 @@ def render_tool_trace_markdown(tool_trace: list[ToolTrace]) -> str:
     return "\n".join(lines)
 
 
-def handle_upload(file_path: str | None) -> tuple[dict[str, Any], str, list[dict[str, str]], str, str]:
-    """Load the CSV and reset the app state for a fresh session."""
+def handle_upload(
+    file_path: str | None,
+    upload_mode: str,
+    session: dict[str, Any] | None,
+) -> tuple[dict[str, Any], str, list[dict[str, str]], str, str]:
+    """Load a CSV into the session, either replacing or appending data."""
     if not file_path:
         return (
-            _empty_session(),
-            "### Dataset\n\nUpload a Scotia CSV to begin.",
+            session or _empty_session(),
+            build_dataset_summary(
+                (session or {}).get("df"),
+                (session or {}).get("errors", []),
+                (session or {}).get("source_label"),
+            )
+            if session and session.get("df") is not None
+            else "### Dataset\n\nUpload a Scotia CSV to begin.",
             [],
             "### Tool Trace\n\nNo run yet.",
             build_status_markdown("No file selected."),
         )
 
-    df, errors = load_agent_dataframe(file_path)
-    session = {
-        "csv_path": file_path,
-        "df": df,
-        "errors": errors,
-    }
-    summary = build_dataset_summary(df, errors, file_path)
-    if errors:
-        status_text = (
-            f"Loaded `{Path(file_path).name}` with {len(errors)} validation warning(s). "
-            "The excluded rows will not be used by the agent."
+    new_df, new_errors = load_agent_dataframe(file_path)
+    new_name = Path(file_path).name
+
+    if upload_mode == "append" and session and session.get("df") is not None:
+        combined_df = pd.concat([session["df"], new_df], ignore_index=True)
+        before_dedup = len(combined_df)
+        combined_df = _dedupe_transactions(combined_df)
+        removed = before_dedup - len(combined_df)
+        combined_errors = list(session.get("errors", [])) + list(new_errors)
+
+        existing_label = session.get("source_label") or _display_source_label(session.get("csv_path"))
+        source_label = f"{existing_label} + {new_name}" if existing_label else new_name
+        next_session = _session_from_dataframe(
+            combined_df,
+            combined_errors,
+            csv_path=file_path,
+            source_label=source_label,
         )
+        summary = build_dataset_summary(combined_df, combined_errors, source_label)
+        if new_errors:
+            status_text = (
+                f"Appended `{new_name}` with {len(new_errors)} validation warning(s). "
+                f"Dataset now has {len(combined_df)} row(s)"
+                + (f" after removing {removed} duplicate row(s)." if removed else ".")
+                + " Chat was reset because the active dataset changed."
+            )
+        else:
+            status_text = (
+                f"Appended `{new_name}`. Dataset now has {len(combined_df)} row(s)"
+                + (f" after removing {removed} duplicate row(s)." if removed else ".")
+                + " Chat was reset because the active dataset changed."
+            )
     else:
-        status_text = f"Loaded `{Path(file_path).name}` successfully and the dataset is ready for questions."
-    return session, summary, [], "### Tool Trace\n\nNo run yet.", build_status_markdown(
+        next_session = _session_from_dataframe(
+            new_df,
+            new_errors,
+            csv_path=file_path,
+            source_label=new_name,
+        )
+        summary = build_dataset_summary(new_df, new_errors, new_name)
+        if new_errors:
+            status_text = (
+                f"Loaded `{new_name}` with {len(new_errors)} validation warning(s). "
+                "The excluded rows will not be used by the agent. Chat was reset because the dataset changed."
+            )
+        else:
+            status_text = (
+                f"Loaded `{new_name}` successfully and the dataset is ready for questions. "
+                "Chat was reset because the dataset changed."
+            )
+
+    return next_session, summary, [], "### Tool Trace\n\nNo run yet.", build_status_markdown(
         status_text,
         heading="Run Status",
     )
@@ -284,7 +423,9 @@ def build_demo():
         ) from e
 
     with gr.Blocks(title="Scotia Spending Agent") as demo:
-        session_state = gr.State(_empty_session())
+        default_session, default_summary, default_status = _load_default_sample_session()
+
+        session_state = gr.State(default_session)
         history_state = gr.State([])
 
         gr.Markdown(
@@ -297,35 +438,42 @@ def build_demo():
         )
 
         with gr.Row():
-            with gr.Column(scale=1, elem_id="sidebar-card"):
+            with gr.Column(scale=11, min_width=420, elem_id="sidebar-card"):
                 gr.Markdown(
                     """
                     ### 1. Load Data
-                    Upload your Scotia CSV once. The app will validate rows, prepare categories,
-                    and make the dataset available to the agent.
+                    A default anonymized sample dataset is loaded automatically.
+                    You can still upload your own Scotia CSV and choose whether to replace
+                    the current dataset or append to it.
                     """
                 )
                 file_input = gr.File(label="Upload Scotia CSV", type="filepath")
+                upload_mode = gr.Radio(
+                    choices=["overwrite", "append"],
+                    value="overwrite",
+                    label="Upload mode",
+                    info="Overwrite replaces the current dataset. Append merges new rows and removes exact duplicates.",
+                )
                 load_button = gr.Button("Load CSV", variant="primary")
                 dataset_summary = gr.Markdown(
-                    "### Dataset\n\nUpload a Scotia CSV to begin.",
+                    default_summary,
                     elem_id="dataset-card",
                 )
                 status_box = gr.Markdown(
-                    build_status_markdown("No file loaded yet."),
+                    default_status,
                     elem_id="status-card",
                 )
 
-            with gr.Column(scale=2, elem_id="conversation-card"):
-                chatbot = gr.Chatbot(label="Conversation", height=460)
+            with gr.Column(scale=21, min_width=760, elem_id="conversation-card"):
                 question_box = gr.Textbox(
                     label="2. Ask a question",
-                    placeholder="e.g. Has my coffee spending increased recently?",
+                    placeholder="e.g. What are my subscription costs for each month?",
                     lines=2,
                 )
                 with gr.Row():
                     ask_button = gr.Button("Ask", variant="primary")
                     clear_button = gr.Button("Clear Chat")
+                chatbot = gr.Chatbot(label="Conversation", min_height=160, max_height=460)
                 with gr.Accordion("How The Agent Worked", open=True, elem_id="trace-card"):
                     trace_box = gr.Markdown("### Tool Trace\n\nNo run yet.")
 
@@ -344,14 +492,18 @@ def build_demo():
 
         load_button.click(
             fn=handle_upload,
-            inputs=file_input,
+            inputs=[file_input, upload_mode, session_state],
             outputs=[session_state, dataset_summary, chatbot, trace_box, status_box],
+            show_progress="minimal",
+            show_progress_on=[dataset_summary],
         )
 
         ask_button.click(
             fn=handle_question,
             inputs=[question_box, session_state, history_state],
             outputs=[chatbot, trace_box, status_box],
+            show_progress="minimal",
+            show_progress_on=[chatbot, trace_box],
         ).then(
             fn=lambda history: history,
             inputs=chatbot,
@@ -366,6 +518,8 @@ def build_demo():
             fn=handle_question,
             inputs=[question_box, session_state, history_state],
             outputs=[chatbot, trace_box, status_box],
+            show_progress="minimal",
+            show_progress_on=[chatbot, trace_box],
         ).then(
             fn=lambda history: history,
             inputs=chatbot,
@@ -380,6 +534,7 @@ def build_demo():
             fn=clear_chat,
             inputs=None,
             outputs=[chatbot, trace_box, status_box],
+            show_progress="hidden",
         ).then(
             fn=lambda: [],
             inputs=None,
