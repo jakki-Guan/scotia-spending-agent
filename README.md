@@ -29,11 +29,12 @@ It is intentionally not just "LLM in, text out". The interesting part is the age
 
 ![Demo GIF](docs/assets/demo.gif)
 
-Suggested recording flow:
+Recording flow:
 
 1. Upload a Scotia CSV
-2. Ask: `What are my subscription costs for each month?`
-3. Show the answer plus the tool trace using `get_grouped_category_trend`
+2. Ask: `How is my bubble tea cost changing recently?`
+3. Ask: `What are my subscription costs for each month?`
+4. Show the answers and the tool trace
 
 ## What It Can Do
 
