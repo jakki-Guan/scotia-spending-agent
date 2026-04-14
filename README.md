@@ -1,7 +1,7 @@
 ---
 title: Scotia Spending Agent
 emoji: 💳
-colorFrom: orange
+colorFrom: yellow
 colorTo: gray
 sdk: gradio
 app_file: app.py
