@@ -16,6 +16,13 @@ This project turns raw Scotia Visa CSV exports into an interactive spending anal
 
 It is intentionally not just "LLM in, text out". The interesting part is the agent loop: the model sees a small set of analysis tools, calls them, reads their structured outputs, and produces a grounded answer. The Gradio app also shows the tool trace so the reasoning is visible.
 
+## Live Demo
+
+- Hugging Face Space: https://huggingface.co/spaces/Jake46/Scotia_Spending_Agent
+- Direct app URL: https://Jake46-Scotia-Spending-Agent.hf.space
+- The public demo loads the bundled anonymized sample dataset by default, so visitors can ask questions immediately.
+- Visitors can also upload their own Scotia CSV and choose whether to `overwrite` the current dataset or `append` and dedupe exact duplicate rows.
+
 ## Demo
 
 ### Demo GIF
@@ -52,7 +59,7 @@ Suggested recording flow:
 - `Phase 1`: Parser + rule-based categorization complete
 - `Phase 2`: Hybrid categorization + tool-calling agent complete
 - `Phase 3`: Gradio UI running locally with default sample-data flow
-- `Phase 4`: Demo assets are in place; deployment prep is next
+- `Phase 4`: First public Hugging Face demo is live; post-deploy validation and polish are next
 
 ## Architecture
 
@@ -145,6 +152,14 @@ See:
 - [DESIGN.md](DESIGN.md)
 
 ## Quick Start
+
+### Try The Public Demo
+
+Open the live Space:
+
+- https://huggingface.co/spaces/Jake46/Scotia_Spending_Agent
+
+The demo starts with the anonymized sample dataset already loaded. You can also upload your own Scotia CSV and choose `overwrite` or `append`.
 
 ### Prerequisites
 
@@ -256,19 +271,18 @@ Longer rationale lives in [DESIGN.md](DESIGN.md).
 
 ## Limitations
 
-- The app currently runs locally; public deployment is still pending
+- The public demo is live, but it still needs a few rounds of external-user validation
 - First load of a new dataset can be slow because uncached long-tail merchants may hit the LLM
 - The agent is tuned for spending analysis, not general personal-finance planning
 - Some grouped financial questions still want additional tools in the future
   Examples: recurring charges, month-over-month comparisons, anomaly detection
-- The public demo path still depends on deployment and public-env configuration
+- Uploaded CSVs are session-scoped in the Gradio app rather than a persistent personal workspace
 
 ## Next Steps
 
-- Prepare the Gradio app for Hugging Face Spaces deployment
-- Decide the public demo configuration for env vars, cache behavior, and sample-data startup
-- Do one final README pass after deployment details are known
-- Only then decide whether more analysis tools are worth adding
+- Validate the live public demo with a few representative questions and note any weak spots
+- Tighten the README based on real public usage feedback
+- Decide whether the next improvement should be more analytics tools or demo hardening
 
 ## License
 
